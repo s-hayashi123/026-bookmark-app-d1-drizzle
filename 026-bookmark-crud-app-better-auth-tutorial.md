@@ -336,7 +336,7 @@ import { toNextJsHandler } from "better-auth/next-js";
 export const { GET, POST } = toNextJsHandler(auth.handler);
 ```
 
-**🤔 The Why:** `[...all]` というファイル名は「キャッチオールルート」と呼ばれ、`/api/auth/` 以下のすべてのリクエスト（例: `/api/auth/signin/github`, `/api/auth/callback/github`, `/api/auth/signout`）をこのファイルで処理することを示します。`toNextJsHandler` が、BetterAuth の内部ロジックと Next.js の作法を繋ぎこむアダプターの役割を果たしています。
+**🤔 The Why:** `[...all]` というファイル名は「キャッチオールルート」と呼ばれ、`/api/auth/` 以下のすべてのリクエスト（例: `/api/auth/sign-in/github`, `/api/auth/callback/github`, `/api/auth/sign-out`）をこのファイルで処理することを示します。`toNextJsHandler` が、BetterAuth の内部ロジックと Next.js の作法を繋ぎこむアダプターの役割を果たしています。UI 側からは `<Link>` でこれらのパスへ直接遷移するのではなく、`authClient.signIn.social` / `authClient.signOut` を呼び出してフローを開始するのが推奨です。
 
 ### 3.2. ダッシュボードの警備員 (ミドルウェア)
 
@@ -482,14 +482,72 @@ export async function deleteBookmark(id: number) {
 
 **🎯 ゴール:** ユーザーのログイン状態に応じて、適切なボタンを表示するコンポーネントを作成する。
 
-**👉 The How:** `components/auth-components.tsx` を作成します。
+**👉 The How:** まず `lib/auth-client.ts` と `components/auth-client-buttons.tsx` を作成し、その後に `components/auth-components.tsx` を作成します。
+
+**`lib/auth-client.ts`**
+
+```ts
+import { createAuthClient } from "better-auth/react";
+
+export const authClient = createAuthClient();
+```
+
+**`components/auth-client-buttons.tsx`**
+
+```tsx
+"use client";
+
+import { authClient } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
+
+export function SignInWithGithubButton() {
+  const handleClick = async () => {
+    await authClient.signIn.social({ provider: "github" });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="bg-gray-800 text-white px-4 py-2 rounded-md"
+    >
+      Sign in with Github
+    </button>
+  );
+}
+
+export function SignOutButton() {
+  const router = useRouter();
+
+  const handleClick = async () => {
+    await authClient.signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          router.push("/");
+        },
+      },
+    });
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      className="bg-red-500 text-white px-4 py-2 rounded-md"
+    >
+      Sign Out
+    </button>
+  );
+}
+```
 
 **`components/auth-components.tsx`**
 
 ```tsx
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import Link from "next/link";
+import {
+  SignInWithGithubButton,
+  SignOutButton,
+} from "@/components/auth-client-buttons";
 
 // このコンポーネントはサーバーサイドでレンダリングされる (RSC)
 export async function AuthButtons() {
@@ -501,25 +559,13 @@ export async function AuthButtons() {
     return (
       <div className="flex items-center gap-4">
         <p>{session.user.email}</p>
-        <Link
-          href="/api/auth/signout" // BetterAuthが用意したサインアウト用エンドポイント
-          className="bg-red-500 text-white px-4 py-2 rounded-md"
-        >
-          Sign Out
-        </Link>
+        <SignOutButton />
       </div>
     );
   }
 
   // ログインしていない場合
-  return (
-    <Link
-      href="/api/auth/signin/github" // BetterAuthが用意したGitHubサインイン用エンドポイント
-      className="bg-gray-800 text-white px-4 py-2 rounded-md"
-    >
-      Sign in with GitHub
-    </Link>
-  );
+  return <SignInWithGithubButton />;
 }
 ```
 
