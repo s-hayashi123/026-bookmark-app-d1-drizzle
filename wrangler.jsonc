@@ -7,6 +7,7 @@
 	"name": "026-bookmark-app-d1-drizzle",
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2025-03-01",
+	"account_id": "7d6e0ddfbdc12312b12943a46e127b2a",
 	"compatibility_flags": [
 		"nodejs_compat",
 		"global_fetch_strictly_public"
@@ -22,7 +23,8 @@
 		{
 			"binding": "_026_db",
 			"database_name": "026-db",
-			"database_id": "f1642191-e2b0-442f-8bdb-a19645f5405c"
+			"database_id": "f1642191-e2b0-442f-8bdb-a19645f5405c",
+			"migrations_dir": "drizzle"
 		}
 	]
 	/**

@@ -44,3 +44,20 @@ next-env.d.ts
 !.dev.vars.example
 .env*
 !.env.example
+
+# Drizzle ORM
+/drizzle/migrations
+/drizzle/meta
+
+# BetterAuth generated files
+auth-schema.ts
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+Thumbs.db
+ehthumbs.db

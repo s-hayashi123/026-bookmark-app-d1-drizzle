@@ -114,7 +114,7 @@ npm install -D drizzle-kit @better-auth/cli
 **🤔 The Why:**
 
 - `better-auth`: 認証機能の主役。ログイン処理やセッション管理を担当します。
-- `drizzle-orm` & `@cloudflare/d1-driver`: データベース操作の相棒。Drizzle が SQL のような直感的なコードを提供し、d1-driver が Cloudflare D1 との通信を担います。
+- `drizzle-orm`: データベース操作の相棒。Drizzle が SQL のような直感的なコードを提供し、Cloudflare D1 との通信を担います。
 - `drizzle-kit` & `@better-auth/cli`: 開発の補助魔法。データベースのテーブル構造（スキーマ）をコードから自動生成してくれる便利なツールです。
 
 ### 1.4. 身分証明書の発行 (GitHub OAuth App)
@@ -151,9 +151,20 @@ GITHUB_CLIENT_SECRET="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 # BetterAuth Secret - 以下のコマンドで生成した値を設定
 # openssl rand -base64 32
 AUTH_SECRET="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Cloudflare D1用の認証情報（drizzle-kit用）
+CLOUDFLARE_ACCOUNT_ID="your_account_id"
+CLOUDFLARE_DATABASE_ID="your_database_id"
+CLOUDFLARE_D1_TOKEN="your_d1_token"
 ```
 
 `AUTH_SECRET` は、セッション情報などを暗号化するための秘密の文字列です。ターミナルで `openssl rand -base64 32` を実行して生成したランダムな文字列を設定してください。
+
+**Cloudflare D1認証情報の取得方法:**
+
+1. **Account ID**: Cloudflareダッシュボードの右サイドバーから確認できます
+2. **Database ID**: `wrangler d1 list` コマンドで確認できます
+3. **D1 Token**: Cloudflareダッシュボードの「My Profile」→「API Tokens」から作成できます（D1:Edit権限が必要）
 
 **🤔 The Why:** `.env.local` ファイルは、Git の管理対象から意図的に除外される（`.gitignore`に記載されている）ファイルです。ここに秘密の情報を書くことで、誤って GitHub などに公開してしまう事故を防ぎます。本番環境では、Cloudflare のダッシュボードから直接これらの値を設定します。
 
@@ -178,10 +189,11 @@ export default defineConfig({
   schema: "./lib/db/schema.ts", // スキーマ定義ファイルの場所
   out: "./drizzle", // マイグレーションファイルの出力先
   dialect: "sqlite", // 使用するDBの種類 (D1はSQLite互換)
-  driver: "d1", // Cloudflare D1用のドライバを指定
+  driver: "d1-http", // Cloudflare D1用のHTTPドライバを指定
   dbCredentials: {
-    wranglerConfigPath: "wrangler.toml", // wranglerの設定ファイルパス
-    dbName: "<YOUR_DB_NAME>", // wrangler d1 createで作成したDB名
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID!,
+    databaseId: process.env.CLOUDFLARE_DATABASE_ID!,
+    token: process.env.CLOUDFLARE_D1_TOKEN!,
   },
 });
 ```
@@ -231,40 +243,45 @@ export const bookmarks = sqliteTable("bookmarks", {
 ```ts
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { DrizzleD1Database } from "drizzle-orm/d1";
+import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
 
-// D1の型推論を正しく行うための仮定義。実際のDBインスタンスはリクエストごとに生成される。
-let db: DrizzleD1Database<typeof schema>;
+const AUTH_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://<YOUR_APP_URL>.pages.dev"
+    : "http://localhost:3000";
+
+// データベースインスタンスを動的に生成する関数
+const getDb = (env: { DB: D1Database }) => {
+  return drizzle(env.DB, { schema });
+};
 
 export const auth = betterAuth({
-  // データベースとの連携設定
-  database: drizzleAdapter(db, {
+  database: drizzleAdapter(getDb({ DB: process.env.DB as any }), {
     provider: "sqlite",
-    usePlural: true, // テーブル名を複数形(users, sessions)にする
+    usePlural: true,
   }),
-  // ログイン方法の設定 (今回はGitHub)
   socialProviders: {
     github: {
       clientId: process.env.GITHUB_CLIENT_ID as string,
       clientSecret: process.env.GITHUB_CLIENT_SECRET as string,
     },
   },
-  // セッション暗号化の秘密鍵
   secret: process.env.AUTH_SECRET,
-  // 認証APIのベースURL
-  authJsUrl: "http://localhost:3000",
+  baseURL: AUTH_URL,
 });
 ```
 
 **🤔 The Why:** ここが認証システムの中心です。`betterAuth` 関数に設定オブジェクトを渡すことで、認証の挙動をカスタマイズします。
 
-- `database`: 認証ライブラリがユーザー情報やセッション情報をどこに保存するかを指定します。`drizzleAdapter` を使うことで、BetterAuth が Drizzle と会話できるようになります。
+- `database`: 認証ライブラリがユーザー情報やセッション情報をどこに保存するかを指定します。`drizzleAdapter` を使うことで、BetterAuth が Drizzle と会話できるようになります。Cloudflare D1では、`getDb`関数で動的にデータベースインスタンスを生成する必要があります。
 - `socialProviders`: どのようなログイン方法を提供するかを定義します。今回は GitHub を設定しています。
-- `secret` と `authJsUrl`: それぞれ環境変数と、認証 API の URL を指定しています。
+- `secret` と `baseURL`: それぞれ環境変数と、認証サーバーのベースURLを指定しています。
 
-> **💡 深掘りコラム: データベースアダプターの役割**
-> なぜ「アダプター」が必要なのでしょうか？ BetterAuth 自身は、特定のデータベース（MySQL, PostgreSQL, SQLite など）の具体的な操作方法を知りません。アダプターは、BetterAuth からの「ユーザー情報を保存して」といった抽象的な指示を、Drizzle ORM が理解できる具体的なコードに「翻訳」してくれる通訳のような存在です。これにより、BetterAuth はデータベースの実装を気にすることなく、認証ロジックに集中できるのです。
+> **💡 深掘りコラム: データベースアダプターの役割とCloudflare D1特有の対応**
+> なぜ「アダプター」が必要なのでしょうか？ BetterAuth 自身は、特定のデータベース（MySQL, PostgreSQL, SQLite など）の具体的な操作方法を知りません。アダプターは、BetterAuth からの「ユーザー情報を保存して」といった抽象的な指示を、Drizzle ORM が理解できる具体的なコードに「翻訳」してくれる通訳のような存在です。
+>
+> **Cloudflare D1特有の対応**: 通常のNode.js環境では、データベースインスタンスを静的に作成できますが、Cloudflare D1では環境変数（`process.env.DB`）から動的にデータベース接続を取得する必要があります。そのため、`getDb`関数でCloudflare D1のバインディングを受け取り、適切なDrizzleインスタンスを生成しています。これにより、BetterAuth はデータベースの実装を気にすることなく、認証ロジックに集中できるのです。
 
 ### 2.4. 設計図からデータベースを構築！ (マイグレーション)
 
@@ -307,9 +324,9 @@ export const auth = betterAuth({
 
 **🎯 ゴール:** BetterAuth が認証処理（サインイン、コールバック、サインアウト等）を行うための API エンドポイントを作成する。
 
-**👉 The How:** `app/api/auth/[...betterauth]/route.ts` というファイルを作成します。
+**👉 The How:** `app/api/auth/[...all]/route.ts` というファイルを作成します。
 
-**`app/api/auth/[...betterauth]/route.ts`**
+**`app/api/auth/[...all]/route.ts`**
 
 ```ts
 import { auth } from "@/lib/auth";
@@ -319,7 +336,7 @@ import { toNextJsHandler } from "better-auth/next-js";
 export const { GET, POST } = toNextJsHandler(auth.handler);
 ```
 
-**🤔 The Why:** `[...betterauth]` というファイル名は「キャッチオールルート」と呼ばれ、`/api/auth/` 以下のすべてのリクエスト（例: `/api/auth/signin/github`, `/api/auth/callback/github`, `/api/auth/signout`）をこのファイルで処理することを示します。`toNextJsHandler` が、BetterAuth の内部ロジックと Next.js の作法を繋ぎこむアダプターの役割を果たしています。
+**🤔 The Why:** `[...all]` というファイル名は「キャッチオールルート」と呼ばれ、`/api/auth/` 以下のすべてのリクエスト（例: `/api/auth/signin/github`, `/api/auth/callback/github`, `/api/auth/signout`）をこのファイルで処理することを示します。`toNextJsHandler` が、BetterAuth の内部ロジックと Next.js の作法を繋ぎこむアダプターの役割を果たしています。
 
 ### 3.2. ダッシュボードの警備員 (ミドルウェア)
 
@@ -352,11 +369,12 @@ export async function middleware(request: NextRequest) {
 
 // このミドルウェアがどのパスで実行されるかを定義
 export const config = {
+  runtime: "nodejs", // Next.js 15.2.0+でNode.js APIにアクセスするために必要
   matcher: ["/dashboard"],
 };
 ```
 
-**🤔 The Why:** Next.js のミドルウェアは、リクエストがページコンポーネントに到達する「前」に実行されるコードです。ここでセッションの有無をチェックすることで、権限のないユーザーを効率的に弾くことができます。これにより、保護されたページの内容が不正に表示されるのを防ぎます。
+**🤔 The Why:** Next.js のミドルウェアは、リクエストがページコンポーネントに到達する「前」に実行されるコードです。ここでセッションの有無をチェックすることで、権限のないユーザーを効率的に弾くことができます。これにより、保護されたページの内容が不正に表示されるのを防ぎます。`runtime: "nodejs"`は、Next.js 15.2.0+でNode.js API（`headers()`など）にアクセスするために必要です。
 
 > **💡 深掘りコラム: 認証 (Authentication) vs 認可 (Authorization)**
 > このミドルウェアが行っているのは**認証 (Authentication)**、つまり「あなた、誰ですか？（ログインしていますか？）」の確認です。一方、**認可 (Authorization)** は「あなたにこの操作をする権限がありますか？（例: 他人のブックマークを削除しようとしていませんか？）」の確認を指します。認可のチェックは、この後のサーバーアクションなど、より具体的な操作を行う場所で実装するのが一般的です。
@@ -379,15 +397,15 @@ export const config = {
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
-export const getDb = () => {
-  // Cloudflare Workers環境では、process.env経由で
-  // wrangler.tomlで設定したbinding名のオブジェクトにアクセスできる
-  const db = drizzle(process.env.DB, { schema });
+export const getDb = (env: { DB: D1Database }) => {
+  // Cloudflare Workers環境では、env経由で
+  // wrangler.jsoncで設定したbinding名のオブジェクトにアクセスできる
+  const db = drizzle(env.DB, { schema });
   return db;
 };
 ```
 
-**🤔 The Why:** この関数を介してデータベースインスタンスを取得することで、コードの再利用性が高まります。また、`process.env.DB` は Cloudflare の環境で実行される際に、`wrangler.toml` で設定した D1 データベースへの接続オブジェクトに自動的に置き換えられます。
+**🤔 The Why:** この関数を介してデータベースインスタンスを取得することで、コードの再利用性が高まります。また、`env.DB` は Cloudflare の環境で実行される際に、`wrangler.jsonc` で設定した D1 データベースへの接続オブジェクトに自動的に置き換えられます。
 
 ### 4.2. アプリの頭脳 (サーバーアクション)
 
@@ -424,7 +442,8 @@ export async function addBookmark(formData: FormData) {
   }
 
   // 3. データベースに新しいブックマークを挿入
-  const db = getDb();
+  // 注意: 実際の実装では、envオブジェクトを渡す必要があります
+  const db = getDb({ DB: process.env.DB as any });
   await db.insert(bookmarks).values({
     userId: session.user.id, // 必ず自分のIDと紐付ける
     url,
@@ -443,7 +462,8 @@ export async function deleteBookmark(id: number) {
     throw new Error("Unauthorized");
   }
 
-  const db = getDb();
+  // 注意: 実際の実装では、envオブジェクトを渡す必要があります
+  const db = getDb({ DB: process.env.DB as any });
 
   // TODO: 認可チェック！本当にこのユーザーがこのブックマークの所有者か確認する
 
@@ -544,15 +564,17 @@ import { getDb } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
+import { bookmarks } from "@/lib/db/schema";
 
 export default async function DashboardPage() {
   // サーバーサイドでセッションとDBからデータを取得
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null; // ミドルウェアで保護済みだが、念のためのチェック
 
-  const db = getDb();
+  // 注意: 実際の実装では、envオブジェクトを渡す必要があります
+  const db = getDb({ DB: process.env.DB as any });
   const userBookmarks = await db.query.bookmarks.findMany({
-    where: eq(db.query.bookmarks.table.userId, session.user.id),
+    where: eq(bookmarks.userId, session.user.id),
     orderBy: (bookmarks, { desc }) => [desc(bookmarks.createdAt)],
   });
 
@@ -649,12 +671,11 @@ npm run dev
 
 **🎯 ゴール:** 本番環境で認証が正しく機能するように、`lib/auth.ts` を修正する。
 
-**👉 The How:** デプロイ後の本番 URL を`authJsUrl`に設定するように修正します。
+**👉 The How:** デプロイ後の本番 URL を`baseURL`に設定するように修正します。
 
 **`lib/auth.ts`**
 
 ```ts
-// ...
 // 環境(NODE_ENV)に応じてURLを切り替える
 const AUTH_URL =
   process.env.NODE_ENV === "production"
@@ -662,8 +683,22 @@ const AUTH_URL =
     : "http://localhost:3000";
 
 export const auth = betterAuth({
-  // ...
-  authJsUrl: AUTH_URL,
+  // データベースとの連携設定
+  database: drizzleAdapter(getDb({ DB: process.env.DB as any }), {
+    provider: "sqlite",
+    usePlural: true, // テーブル名を複数形(users, sessions)にする
+  }),
+  // ログイン方法の設定 (今回はGitHub)
+  socialProviders: {
+    github: {
+      clientId: process.env.GITHUB_CLIENT_ID as string,
+      clientSecret: process.env.GITHUB_CLIENT_SECRET as string,
+    },
+  },
+  // セッション暗号化の秘密鍵
+  secret: process.env.AUTH_SECRET,
+  // 認証サーバーのベースURL
+  baseURL: AUTH_URL,
 });
 ```
 
