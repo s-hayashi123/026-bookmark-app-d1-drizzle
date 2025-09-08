@@ -1,13 +1,14 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { getDB } from "@/lib/db";
+import { getAuth } from "@/lib/auth";
+import { getDBFromCloudflare } from "@/lib/db";
 import { bookmarks } from "@/lib/db/schema";
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 
 export async function addBookmark(formData: FormData) {
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     throw new Error("Unauthorized");
@@ -17,10 +18,10 @@ export async function addBookmark(formData: FormData) {
   const title = formData.get("title") as string;
 
   if (!url || !title) {
-    throw new Error("URL and tile are required");
+    throw new Error("URL and title are required");
   }
 
-  const db = getDB({ DB: process.env.DB as any });
+  const db = getDBFromCloudflare();
   await db.insert(bookmarks).values({
     userId: session.user.id,
     url,
@@ -31,12 +32,13 @@ export async function addBookmark(formData: FormData) {
 }
 
 export async function deleteBookmark(id: number) {
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     throw new Error("Unauthorized");
   }
 
-  const db = getDB({ DB: process.env.DB as any });
+  const db = getDBFromCloudflare();
 
   await db.delete(bookmarks).where(eq(bookmarks.id, id));
 

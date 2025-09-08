@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { getAuth } from "@/lib/auth";
 import { headers } from "next/headers";
 import {
   SignInWithGithubButton,
@@ -6,6 +6,7 @@ import {
 } from "@/components/auth-client-buttons";
 
 export async function AuthButtons() {
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (session) {
     return (

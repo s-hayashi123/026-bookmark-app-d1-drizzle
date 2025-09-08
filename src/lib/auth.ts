@@ -9,34 +9,27 @@ const AUTH_URL =
     ? "https://026-bookmark-app-d1-drizzle.pages.dev"
     : "http://localhost:3000";
 
-// データベースインスタンスを動的に生成する関数
-const getDb = (env: { DB: D1Database }) => {
-  return drizzle(env.DB, { schema });
-};
-
-// OpenNext Cloudflare から D1 バインディングを取得
-const getDbFromCloudflare = () => {
+function getDbFromCloudflare() {
   const { env } = getCloudflareContext();
-  const db = (env as any)._026_db as D1Database; // see wrangler.jsonc d1_databases.binding
-  return getDb({ DB: db });
-};
+  const DB = (env as Record<string, unknown>)._026_db as D1Database; // wrangler.jsoncのbinding名
+  return drizzle(DB, { schema });
+}
 
-export const auth = betterAuth({
-  adapter: drizzleAdapter(getDbFromCloudflare(), {
-    provider: "sqlite",
-    usePlural: true,
-  }),
-  socialProviders: {
-    github: {
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+let _auth: ReturnType<typeof betterAuth> | null = null;
+
+export function getAuth() {
+  if (_auth) return _auth;
+  const db = getDbFromCloudflare();
+  _auth = betterAuth({
+    database: drizzleAdapter(db, { provider: "sqlite", usePlural: true }),
+    socialProviders: {
+      github: {
+        clientId: process.env.GITHUB_CLIENT_ID!,
+        clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      },
     },
-  },
-  secret: process.env.AUTH_SECRET,
-  baseURL: AUTH_URL,
-});
-
-// ランタイムでデータベースを取得する関数
-export const getDbInstance = (env: { DB: D1Database }) => {
-  return getDb(env);
-};
+    secret: process.env.AUTH_SECRET,
+    baseURL: AUTH_URL,
+  });
+  return _auth;
+}

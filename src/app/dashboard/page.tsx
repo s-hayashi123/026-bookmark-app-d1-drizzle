@@ -1,16 +1,17 @@
 import { addBookmark, deleteBookmark } from "@/app/actions";
 import { AuthButtons } from "@/components/auth-components";
-import { getDB } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { getDBFromCloudflare } from "@/lib/db";
+import { getAuth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { bookmarks } from "@/lib/db/schema";
 
 export default async function DashboardPage() {
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
 
-  const db = getDB({ DB: process.env.DB as any });
+  const db = getDBFromCloudflare();
   const userBookmarks = await db.query.bookmarks.findMany({
     where: eq(bookmarks.userId, session.user.id),
     orderBy: (bookmarks, { desc }) => [desc(bookmarks.createdAt)],

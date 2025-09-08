@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 
 export function SignInWithGithubButton() {
   const handleClick = async () => {
-    await authClient.signIn.social({ provider: "github" });
+    await authClient.signIn.social({
+      provider: "github",
+      callbackURL: "/dashboard",
+    });
   };
 
   return (

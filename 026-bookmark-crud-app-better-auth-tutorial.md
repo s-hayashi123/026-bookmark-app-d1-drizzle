@@ -186,7 +186,7 @@ CLOUDFLARE_D1_TOKEN="your_d1_token"
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
-  schema: "./lib/db/schema.ts", // スキーマ定義ファイルの場所
+  schema: "./src/lib/db/schema.ts", // スキーマ定義ファイルの場所
   out: "./drizzle", // マイグレーションファイルの出力先
   dialect: "sqlite", // 使用するDBの種類 (D1はSQLite互換)
   driver: "d1-http", // Cloudflare D1用のHTTPドライバを指定
@@ -329,11 +329,15 @@ export const auth = betterAuth({
 **`app/api/auth/[...all]/route.ts`**
 
 ```ts
-import { auth } from "@/lib/auth";
-import { toNextJsHandler } from "better-auth/next-js";
+import { getAuth } from "@/lib/auth";
 
-// betterAuthの内部ハンドラをNext.jsのリクエスト/レスポンス形式に変換
-export const { GET, POST } = toNextJsHandler(auth.handler);
+export async function GET(req: Request) {
+  return getAuth().handler(req);
+}
+
+export async function POST(req: Request) {
+  return getAuth().handler(req);
+}
 ```
 
 **🤔 The Why:** `[...all]` というファイル名は「キャッチオールルート」と呼ばれ、`/api/auth/` 以下のすべてのリクエスト（例: `/api/auth/sign-in/github`, `/api/auth/callback/github`, `/api/auth/sign-out`）をこのファイルで処理することを示します。`toNextJsHandler` が、BetterAuth の内部ロジックと Next.js の作法を繋ぎこむアダプターの役割を果たしています。UI 側からは `<Link>` でこれらのパスへ直接遷移するのではなく、`authClient.signIn.social` / `authClient.signOut` を呼び出してフローを開始するのが推奨です。
@@ -349,27 +353,17 @@ export const { GET, POST } = toNextJsHandler(auth.handler);
 ```ts
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { getAuth } from "@/lib/auth";
 
 export async function middleware(request: NextRequest) {
-  // リクエストヘッダーからセッション情報を取得
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
-
-  // セッションがなければ、未認証と判断
-  if (!session) {
-    // トップページに強制的にリダイレクト
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
-  // 認証済みであれば、要求されたページへのアクセスを許可
+  const auth = getAuth();
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return NextResponse.redirect(new URL("/", request.url));
   return NextResponse.next();
 }
 
-// このミドルウェアがどのパスで実行されるかを定義
 export const config = {
-  runtime: "nodejs", // Next.js 15.2.0+でNode.js APIにアクセスするために必要
+  runtime: "nodejs",
   matcher: ["/dashboard"],
 };
 ```
@@ -396,12 +390,16 @@ export const config = {
 ```ts
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-export const getDb = (env: { DB: D1Database }) => {
-  // Cloudflare Workers環境では、env経由で
-  // wrangler.jsoncで設定したbinding名のオブジェクトにアクセスできる
-  const db = drizzle(env.DB, { schema });
-  return db;
+export const getDB = (env: { DB: D1Database }) => {
+  return drizzle(env.DB, { schema });
+};
+
+export const getDBFromCloudflare = () => {
+  const { env } = getCloudflareContext();
+  const DB = (env as any)._026_db as D1Database; // wrangler の binding 名
+  return drizzle(DB, { schema });
 };
 ```
 
@@ -542,7 +540,7 @@ export function SignOutButton() {
 **`components/auth-components.tsx`**
 
 ```tsx
-import { auth } from "@/lib/auth";
+import { getAuth } from "@/lib/auth";
 import { headers } from "next/headers";
 import {
   SignInWithGithubButton,
@@ -551,7 +549,7 @@ import {
 
 // このコンポーネントはサーバーサイドでレンダリングされる (RSC)
 export async function AuthButtons() {
-  // サーバーサイドで直接セッション情報を取得
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (session) {
@@ -606,19 +604,18 @@ export default function HomePage() {
 ```tsx
 import { addBookmark, deleteBookmark } from "@/app/actions";
 import { AuthButtons } from "@/components/auth-components";
-import { getDb } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { getDBFromCloudflare } from "@/lib/db";
+import { getAuth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { bookmarks } from "@/lib/db/schema";
 
 export default async function DashboardPage() {
-  // サーバーサイドでセッションとDBからデータを取得
+  const auth = getAuth();
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return null; // ミドルウェアで保護済みだが、念のためのチェック
+  if (!session) return null;
 
-  // 注意: 実際の実装では、envオブジェクトを渡す必要があります
-  const db = getDb({ DB: process.env.DB as any });
+  const db = getDBFromCloudflare();
   const userBookmarks = await db.query.bookmarks.findMany({
     where: eq(bookmarks.userId, session.user.id),
     orderBy: (bookmarks, { desc }) => [desc(bookmarks.createdAt)],
