@@ -22,7 +22,7 @@ const getDbFromCloudflare = () => {
 };
 
 export const auth = betterAuth({
-  database: drizzleAdapter(getDbFromCloudflare(), {
+  adapter: drizzleAdapter(getDbFromCloudflare(), {
     provider: "sqlite",
     usePlural: true,
   }),
