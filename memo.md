@@ -236,6 +236,81 @@ export async function AuthButtons() {
 
 ---
 
+## 今回追加で判明したポイント（Workers/Pages 混在とリダイレクト不発）
+
+### 6) Workers と Pages の設定混在でビルド/デプロイが破綻
+
+- 症状:
+  - `.open-next/worker.js` を生成しているのに Pages へデプロイしてデフォルト画面になる
+  - `Must specify a project name.` / `The entry-point file at ".open-next/worker.js" was not found.`
+  - `Configuration file cannot contain both "main" and "pages_build_output_dir"`
+- 原因:
+  - `wrangler.jsonc` に Workers 用（`main`, `assets`, `account_id`, `d1_databases`）と Pages 用（`pages_build_output_dir`）のキーが混在
+  - Pages では `_worker.js` が必要だが、Workers ビルドの `worker.js` を作っていた
+- 対策（どちらかに統一）:
+  - Workers 運用: `wrangler.jsonc` は `main: ".open-next/worker.js"` を持つ Workers 専用にし、`npx opennextjs-cloudflare build && npx wrangler deploy`
+  - Pages 運用: `wrangler.jsonc` は `pages_build_output_dir: ".open-next"` のみにし、ビルドは `npx opennextjs-cloudflare build`。デプロイコマンドは空 or ダミー（Pagesが自動アップロード）
+
+### 7) API トークンの権限不足で Pages デプロイ失敗（code:10000）
+
+- 症状:
+  - `Authentication error [code: 10000]`（`CLOUDFLARE_API_TOKEN` 使用時）
+- 原因:
+  - Pages の内蔵認証を API トークンで上書きし、権限（Pages:Edit）が不足
+- 対策:
+  - Pages 標準運用: `CLOUDFLARE_API_TOKEN` を環境から排除し、Pages の内蔵認証に任せる
+  - CLI 明示デプロイ時: `Pages:Edit` 権限付きトークンを発行し `--project-name` を付けて実行
+
+### 8) ローカルとプレビューのオリジン不一致で Better Auth が拒否
+
+- 症状:
+  - `Invalid origin: http://localhost:8787`（trustedOrigins 未設定）
+- 原因:
+  - `trustedOrigins`/`baseURL` が `3000` 固定で、`wrangler preview/dev`（`8787`）や Pages の URL を含めていない
+- 対策:
+  - dev: `trustedOrigins` に `http://localhost:3000`, `http://localhost:8787` などを含める
+  - 本番/プレビュー: Pages の実行 URL（`https://<project>.<account>.pages.dev` など）を `baseURL` と `trustedOrigins` に反映
+
+### 9) RSC でのDB/セッション参照に伴う静的化問題
+
+- 症状:
+  - ビルド時に `getCloudflareContext` が同期モードで呼ばれるエラー
+- 原因:
+  - ページが静的プリレンダー対象のまま RSC 内で `getAuth()` / DB を参照
+- 対策:
+  - 該当ページ先頭に `export const dynamic = "force-dynamic"; export const revalidate = 0; export const runtime = "nodejs";` を付与
+  - 可能ならデータ取得はサーバーアクション/APIに寄せ、ページは静的でも落ちない構成にする
+
+### 10) 認証後に `/dashboard` へ遷移しない
+
+- 症状:
+  - GitHub 認証は通るがトップに戻る / ダッシュボードに行かない
+- 原因:
+  - `authClient.signIn.social` に `callbackURL` を指定していない
+- 対策:
+  - `authClient.signIn.social({ provider: "github", callbackURL: "/dashboard" })`
+  - 併せてミドルウェアで「未ログイン→`/`」「ログイン済みで`/`→`/dashboard`」を制御するとより確実
+
+---
+
+## 運用ガイド（Workers統一パス）
+
+1. `wrangler.jsonc` を Workers 専用に（`main: .open-next/worker.js` / `d1_databases` を保持、`pages_build_output_dir` は入れない）
+2. ビルド: `npx opennextjs-cloudflare build`（`.open-next/worker.js` が生成）
+3. デプロイ: `npx wrangler deploy`
+4. ダッシュボードで Vars/Secrets（`GITHUB_CLIENT_ID` など）と D1 Binding（`_026_db`）を設定
+5. Better Auth の `baseURL`/`trustedOrigins` を Worker の公開 URL（またはカスタムドメイン）に合わせる
+
+## 運用ガイド（Pages統一パス）
+
+1. `wrangler.jsonc` を Pages 専用に（`pages_build_output_dir: .open-next` のみ）
+2. ビルド: `npx opennextjs-cloudflare build`（`.open-next/_worker.js` が生成）
+3. デプロイ: Pages が自動アップロード（デプロイコマンドは空 or ダミー）
+4. ダッシュボードで Env と D1 Binding を設定
+5. Better Auth の `baseURL`/`trustedOrigins` を Pages の URL に合わせる
+
+---
+
 ## 参考リンク
 
 - Cloudflare D1 × Drizzle Kit
@@ -244,3 +319,8 @@ export async function AuthButtons() {
 - Better Auth
   - [Drizzle adapter](https://www.better-auth.com/docs/adapters/drizzle)
   - [Next.js integration](https://www.better-auth.com/docs/integrations/next)
+
+npx wrangler deploy
+
+npx opennextjs-cloudflare build
+npm run build
