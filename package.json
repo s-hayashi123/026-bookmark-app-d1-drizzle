@@ -9,7 +9,9 @@
 		"lint": "next lint",
 		"deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
 		"preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts"
+		"cf-typegen": "wrangler types --env-interface CloudflareEnv ./cloudflare-env.d.ts",
+		"cf:build": "opennextjs-cloudflare build",
+    	"cf:pages:deploy": "wrangler pages deploy .open-next"
 	},
 	"dependencies": {
 		"@opennextjs/cloudflare": "^1.8.0",
