@@ -4,10 +4,10 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const AUTH_URL =
-  process.env.NODE_ENV === "production"
-    ? "https://026-bookmark-app-d1-drizzle.pages.dev"
-    : "http://localhost:3000";
+const AUTH_URL = "http://localhost:8787";
+// process.env.NODE_ENV === "production"
+//   ? "https://026-bookmark-app-d1-drizzle.pages.dev"
+//   : "http://localhost:8787";
 
 function getDbFromCloudflare() {
   const { env } = getCloudflareContext();

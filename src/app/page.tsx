@@ -1,13 +1,8 @@
-import { AuthButtons } from "@/components/auth-components";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "@/lib/db/schema";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const runtime = "nodejs";
 
-function getDbFromCloudflare() {
-  const { env } = getCloudflareContext();
-  const DB = (env as Record<string, unknown>)._026_db as D1Database;
-  return drizzle(DB, { schema });
-}
+import { AuthButtons } from "@/components/auth-components";
 
 export default function HomePage() {
   return (
