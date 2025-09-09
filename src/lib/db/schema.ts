@@ -1,6 +1,5 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
-// BetterAuthで生成された認証テーブル
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
