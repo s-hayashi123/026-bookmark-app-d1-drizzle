@@ -8,6 +8,7 @@
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2025-03-01",
 	"account_id": "7d6e0ddfbdc12312b12943a46e127b2a",
+	"pages_build_output_dir": ".open-next",
 	"compatibility_flags": [
 		"nodejs_compat",
 		"global_fetch_strictly_public"
